@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>OpenCode-ProxyLauncher</AssemblyName>
+    <RootNamespace>OpenCodeProxyLauncher</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Product>OpenCode Proxy Launcher</Product>
+    <AssemblyTitle>OpenCode 代理启动器</AssemblyTitle>
+    <Version>0.1</Version>
+  </PropertyGroup>
+
+</Project>
