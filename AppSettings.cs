@@ -36,6 +36,15 @@ namespace OpenCodeProxyLauncher
         /// <summary>用量数字显示单位：raw / wan / qianwan / yi。</summary>
         public string NumberUnit { get; set; } = Units.Raw;
 
+        /// <summary>窗口位置与尺寸记忆（为 null 表示还没记过）。</summary>
+        public double? WindowX { get; set; }
+
+        public double? WindowY { get; set; }
+
+        public double? WindowWidth { get; set; }
+
+        public double? WindowHeight { get; set; }
+
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,

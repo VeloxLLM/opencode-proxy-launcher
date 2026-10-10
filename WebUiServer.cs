@@ -55,6 +55,8 @@ namespace OpenCodeProxyLauncher
 
         WebUiAction LaunchOpenCode();
 
+        WebUiAction StopOpenCode();
+
         Task<WebUiAction> CheckProxyAsync();
     }
 
@@ -267,6 +269,10 @@ namespace OpenCodeProxyLauncher
             {
                 json = JsonSerializer.Serialize(_host.LaunchOpenCode(), JsonOptions);
             }
+            else if (path == "/api/stop" && method == "POST")
+            {
+                json = JsonSerializer.Serialize(_host.StopOpenCode(), JsonOptions);
+            }
             else if (path == "/api/check" && method == "POST")
             {
                 WebUiAction action = await _host.CheckProxyAsync();
@@ -357,6 +363,7 @@ namespace OpenCodeProxyLauncher
                 .Replace("__LBL_PATH__", Strings.T("webui.page.path"))
                 .Replace("__LBL_ACTIONS__", Strings.IsEnglish ? "Actions" : "操作")
                 .Replace("__LBL_LAUNCH__", Strings.T("webui.page.launch"))
+                .Replace("__LBL_STOP__", Strings.T("webui.page.stop"))
                 .Replace("__LBL_CHECK__", Strings.T("webui.page.check"))
                 .Replace("__LBL_REFRESH__", Strings.T("webui.page.refresh"))
                 .Replace("__LBL_USAGE__", Strings.T("usage.title"))
@@ -431,6 +438,7 @@ namespace OpenCodeProxyLauncher
   button{border:0;border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer;font-family:inherit}
   .primary{background:var(--accent);color:#fff}
   .ghost{background:var(--card);color:var(--text);border:1px solid var(--border)}
+  #btnStop:hover{border-color:var(--err);color:var(--err)}
   button:disabled{opacity:.5;cursor:default}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
   .stat{background:var(--log);border:1px solid var(--border);border-radius:10px;padding:12px}
@@ -478,6 +486,7 @@ namespace OpenCodeProxyLauncher
     <div class="btns">
       <button class="primary" id="btnLaunch">__LBL_LAUNCH__</button>
       <button class="ghost" id="btnCheck">__LBL_CHECK__</button>
+      <button class="ghost" id="btnStop">__LBL_STOP__</button>
       <button class="ghost" id="btnRefresh">__LBL_REFRESH__</button>
     </div>
   </div>
@@ -651,7 +660,7 @@ function setLog(text) {
 }
 
 function busy(on) {
-  ["btnLaunch", "btnCheck", "btnRefresh"].forEach(id => $(id).disabled = on);
+  ["btnLaunch", "btnCheck", "btnStop", "btnRefresh"].forEach(id => $(id).disabled = on);
 }
 
 async function refreshAll() {
@@ -666,6 +675,19 @@ $("btnLaunch").onclick = async () => {
   setLog("…");
   try {
     const r = await api("/api/launch", "POST");
+    setLog((r.ok ? "✓ " : "✗ ") + (r.message || "") + "\n" + (r.lines || []).join("\n"));
+    await loadStatus();
+  } catch (e) {
+    setLog(String(e));
+  }
+  busy(false);
+};
+
+$("btnStop").onclick = async () => {
+  busy(true);
+  setLog("…");
+  try {
+    const r = await api("/api/stop", "POST");
     setLog((r.ok ? "✓ " : "✗ ") + (r.message || "") + "\n" + (r.lines || []).join("\n"));
     await loadStatus();
   } catch (e) {

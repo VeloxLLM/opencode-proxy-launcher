@@ -47,6 +47,8 @@ namespace OpenCodeProxyLauncher
             UpdateUnitButtons();
             RenderUsage();
             _ = RefreshUsageAsync(false);
+
+            RestoreWindowGeometry();
         }
 
         private static string AppVersion
@@ -65,13 +67,56 @@ namespace OpenCodeProxyLauncher
             }
         }
 
-        /// <summary>供 --shot 截图模式选择要展示的标签页。</summary>
-        public void SelectTab(int index)
+        /// <summary>把当前窗口的位置和尺寸记下来。</summary>
+        public void SaveWindowGeometry()
         {
-            if (index >= 0 && index < MainTabs.Items.Count)
+            _settings.WindowX = Left;
+            _settings.WindowY = Top;
+            _settings.WindowWidth = Width;
+            _settings.WindowHeight = Height;
+            _settings.Save();
+        }
+
+        /// <summary>
+        /// 恢复上次记住的窗口位置与尺寸。
+        /// 如果那块区域已经不在任何屏幕上（比如拔了外接显示器），就退回居中显示。
+        /// </summary>
+        public void RestoreWindowGeometry()
+        {
+            double x, y, w, h;
+
+            if (_settings.WindowX.HasValue && _settings.WindowY.HasValue
+                && _settings.WindowWidth.HasValue && _settings.WindowHeight.HasValue)
             {
-                MainTabs.SelectedIndex = index;
+                x = _settings.WindowX.Value;
+                y = _settings.WindowY.Value;
+                w = Math.Max(_settings.WindowWidth.Value, MinWidth);
+                h = Math.Max(_settings.WindowHeight.Value, MinHeight);
             }
+            else
+            {
+                return; // 没记过就用默认（居中）
+            }
+
+            // 虚拟屏幕 = 所有显示器的合并区域
+            double screenLeft = SystemParameters.VirtualScreenLeft;
+            double screenTop = SystemParameters.VirtualScreenTop;
+            double screenRight = screenLeft + SystemParameters.VirtualScreenWidth;
+            double screenBottom = screenTop + SystemParameters.VirtualScreenHeight;
+
+            // 至少要有一部分落在某个屏幕里，否则认为位置失效
+            bool visible = x < screenRight - 80 && y < screenBottom - 80
+                           && x + w > screenLeft + 80 && y + h > screenTop + 80;
+
+            if (!visible)
+            {
+                return;
+            }
+
+            Left = x;
+            Top = y;
+            Width = w;
+            Height = h;
         }
 
         protected override void OnSourceInitialized(EventArgs e)
@@ -158,6 +203,8 @@ namespace OpenCodeProxyLauncher
 
         protected override void OnClosed(EventArgs e)
         {
+            SaveWindowGeometry();
+
             if (_webUi != null)
             {
                 _webUi.Dispose();
@@ -195,6 +242,7 @@ namespace OpenCodeProxyLauncher
             TabUsage.Header = Strings.T("tab.usage");
             TabLog.Header = Strings.T("tab.log");
             LogHint.Text = Strings.T("log.hint");
+            ExportLogButton.Content = Strings.T("log.export");
 
             SettingsSubtitle.Text = Strings.T("card.settings.sub");
             ProxyLabel.Text = Strings.T("field.proxy");
@@ -666,6 +714,124 @@ namespace OpenCodeProxyLauncher
         UsageReport IWebUiHost.GetUsage()
         {
             return UsageReader.Read();
+        }
+
+        private void ExportLogButton_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                FileName = "opencode-launcher-log-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt",
+                Filter = "Text files|*.txt|All files|*.*",
+                DefaultExt = ".txt",
+            };
+
+            if (dialog.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            try
+            {
+                var builder = new System.Text.StringBuilder();
+                builder.AppendLine("OpenCode 代理启动器 / OpenCode Proxy Launcher");
+                builder.AppendLine("导出时间 / Exported: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                builder.AppendLine("代理 / Proxy: " + _settings.ProxyUrl);
+                builder.AppendLine("OpenCode: " + _settings.OpenCodePath);
+                builder.AppendLine("NO_PROXY: " + _settings.NoProxy);
+                builder.AppendLine();
+                builder.AppendLine(LogBox.Text);
+
+                System.IO.File.WriteAllText(dialog.FileName, builder.ToString(), System.Text.Encoding.UTF8);
+                Log(Strings.T("log.exported", dialog.FileName));
+            }
+            catch (Exception ex)
+            {
+                Log(Strings.T("log.exportFailed", ex.Message));
+            }
+        }
+
+        WebUiAction IWebUiHost.StopOpenCode()
+        {
+            return StopOpenCodeCore();
+        }
+
+        /// <summary>停止正在运行的 OpenCode（先请求关闭窗口，不行再强杀）。</summary>
+        private static WebUiAction StopOpenCodeCore()
+        {
+            var action = new WebUiAction();
+
+            try
+            {
+                Process[] processes = Process.GetProcessesByName("OpenCode");
+                if (processes.Length == 0)
+                {
+                    action.Ok = true;
+                    action.Message = Strings.T("webui.stopNone");
+                    action.Lines.Add(action.Message);
+                    return action;
+                }
+
+                foreach (Process process in processes)
+                {
+                    try
+                    {
+                        if (!process.CloseMainWindow())
+                        {
+                            process.Kill();
+                        }
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            process.Kill();
+                        }
+                        catch
+                        {
+                            // 已经退了就算了
+                        }
+                    }
+                }
+
+                // 给 2 秒优雅退出的时间，还没退就强杀
+                const int wait = 2000;
+                int elapsed = 0;
+                while (elapsed < wait)
+                {
+                    System.Threading.Thread.Sleep(250);
+                    elapsed += 250;
+
+                    if (Process.GetProcessesByName("OpenCode").Length == 0)
+                    {
+                        break;
+                    }
+                }
+
+                Process[] remaining = Process.GetProcessesByName("OpenCode");
+                foreach (Process process in remaining)
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                        // 忽略
+                    }
+                }
+
+                action.Ok = true;
+                action.Message = Strings.T("webui.stopped", processes.Length);
+                action.Lines.Add(action.Message);
+            }
+            catch (Exception ex)
+            {
+                action.Ok = false;
+                action.Message = Strings.T("webui.stopFailed", ex.Message);
+                action.Lines.Add(action.Message);
+            }
+
+            return action;
         }
 
         async Task<AccountUsage> IWebUiHost.GetAccountUsageAsync()

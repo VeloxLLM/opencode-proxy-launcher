@@ -10,9 +10,8 @@
 - [ ] **支持 macOS** —— 环境变量注入逻辑可复用；需要把 WPF 换成 Avalonia / MAUI，并处理 `.app` 包启动
 - [ ] **支持 Linux** —— 同上；另外 `winsqlite3.dll` 那套要换成系统 SQLite（或内嵌 sqlite 库）
 - [ ] 补 `LICENSE` 文件（README 声明 MIT，但仓库里还没有这个文件）
-- [ ] 可选增强：窗口尺寸 / 位置记忆、日志区「导出」按钮、检测结果行内着色
 - [ ] 可选：把「检测代理」依赖的 `ip-api.com` 做成可配置（部分地区访问不稳）
-- [ ] 可选：WebUI 增加「停止 OpenCode」按钮（目前只能启动）
+- [ ] 可选：检测结果行内着色
 
 ### 动手前注意事项
 
@@ -62,6 +61,14 @@
   - 新增**缓存命中率** = cache read / (cache read + input)。
   - 移除「近 7 天」图表（用户反馈不需要）。
   - README / GITHUB.md 改为**中英双语（中文在前，英文在后）**；新增 macOS / Linux 支持的 TODO。
+  - **取消 `--shot` 截图功能**（App.xaml.cs 里的解析与 `SaveScreenshot`、MainWindow 的 `SelectTab` 已删除）。
+  - 新增**窗口尺寸 / 位置记忆**（`AppSettings.WindowX/Y/Width/Height`，恢复时会校验是否还在虚拟屏幕内，否则退回居中）。
+  - 新增**日志导出按钮**（在「日志」页右上角，导出为 txt，含代理配置头）。
+  - 新增 **WebUI「停止 OpenCode」**：`POST /api/stop`，先 `CloseMainWindow()`，2 秒后仍未退出才 `Kill()`。
+  - 新增 **应用图标** `app.ico`（Pillow 画的蓝紫渐变圆角 + 白色 "OC"，7 个尺寸），
+    csproj 里 `<ApplicationIcon>app.ico</ApplicationIcon>`。
+  - README 新增「OpenCode 版本兼容性」：实测 **v1.18.35**（官方仓库是 **`anomalyco/opencode`**，不是 sst）；
+    v2 官网已预告但暂无正式 release tag；启动器与 OpenCode 版本无关。
 
 当前仓库状态：
 

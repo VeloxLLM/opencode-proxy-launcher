@@ -52,7 +52,9 @@ AI_APICallError: This model is not available in your country
   - **账户额度** —— 通过官方接口 `GET https://opencode.ai/zen/go/v1/usage` 读取 **5 小时 / 每周 / 每月**三个窗口的额度占用百分比与重置倒计时
   - **本地统计** —— 会话数、累计花费、输入 / 输出 / 推理 / 缓存 token、**缓存命中率**、按模型分布、最近会话、**今日用量**
   - **四种数字单位** —— 默认 / 万 / 千万 / 亿，一键切换
-- **WebUI（默认开启）** —— 在浏览器里启动 OpenCode、跑体检、看用量
+- **WebUI（默认开启）** —— 在浏览器里**启动 / 停止** OpenCode、跑体检、看用量
+- **窗口尺寸与位置记忆** —— 关掉再打开，还在原来的位置和大小
+- **日志导出** —— 把检测与启动的完整记录一键存成 txt
 - **深色 / 浅色主题** + **中文 / English** —— 首次启动跟随系统，标题栏一键切换并记住
 - **零系统污染** —— 不写注册表、不改系统代理、不影响其它程序
 
@@ -77,6 +79,7 @@ AI_APICallError: This model is not available in your country
 打开后可以：
 
 - **启动 OpenCode** —— 效果和界面里点按钮完全一致（同样带代理环境变量 + 存活确认）
+- **停止 OpenCode** —— 先请求关闭窗口，2 秒后仍未退出才结束进程
 - **检测代理** —— 直接看到经代理的出口 IP 与国家
 - **查看用量** —— 账户额度与本地统计，并支持 **默认 / 万 / 千万 / 亿** 四种单位切换
 
@@ -117,7 +120,8 @@ Windows 的环境变量键名**大小写不敏感**，所以这会覆盖掉从�
 ```
 opencode-proxy-launcher/
 ├── OpenCodeProxyLauncher.csproj   net10.0-windows + WPF
-├── App.xaml / App.xaml.cs         应用入口（含 --shot 截图模式）
+├── app.ico                        应用图标
+├── App.xaml / App.xaml.cs         应用入口
 ├── MainWindow.xaml / .xaml.cs     主界面（设置 / 用量 / 日志 三个标签页）
 ├── Theme.xaml                     样式（颜色全部走 DynamicResource）
 ├── ThemeLight.xaml / ThemeDark.xaml   两套调色板
@@ -184,12 +188,14 @@ dotnet publish -c Release -r win-x64 \
 1. `--self-contained false` 这种命令行写法在 .NET 10 下会被忽略、照样产出自包含的大包，必须写成 `-p:SelfContained=false`。
 2. WPF 的原生库（`wpfgfx_cor3.dll`、`PresentationNative_cor3.dll` 等）**默认不会被塞进单文件**，不加 `IncludeNativeLibrariesForSelfExtract=true` 就会在 exe 旁边多出 5 个 dll。
 
-### 生成界面截图
+## OpenCode 版本兼容性
 
-```bash
-# 第二个参数是输出路径，第三个参数可选：0=设置 1=用量 2=日志
-OpenCode-ProxyLauncher.exe --shot docs/ui.png 1
-```
+- **已实测验证**：OpenCode 桌面版 **v1.18.35**（官方仓库 [`anomalyco/opencode`](https://github.com/anomalyco/opencode) 目前最新的正式 release，2026-10-06）
+  - 本机安装路径：`%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe`
+- **关于 OpenCode v2**：官网已预告 v2，但截至目前官方仓库还没有 v2 的正式 release tag。
+  本启动器只做一件事 —— **创建进程时注入环境变量**，与 OpenCode 自身的版本无关；
+  因此 v1 / v2 通用，只要桌面版仍然是"启动时读环境变量"这个机制。
+  若 v2 换了安装目录，用界面里的「自动检测」或「浏览...」重新指定即可。
 
 ## 常见问题
 
@@ -233,9 +239,6 @@ OpenCode-ProxyLauncher.exe --shot docs/ui.png 1
 
 - [ ] **支持 macOS** —— 环境变量注入逻辑一致，需要把 WPF 界面换成 Avalonia 或 MAUI，并处理 `.app` 包启动方式
 - [ ] **支持 Linux** —— 同上；另外代理环境变量、`winsqlite3.dll` 那套要换成系统的 SQLite
-- [ ] 窗口尺寸 / 位置记忆
-- [ ] 日志导出按钮
-- [ ] WebUI 增加「停止 OpenCode」
 
 ## 致谢
 
@@ -279,7 +282,9 @@ This tool does the obvious thing: **it sets the environment variables itself, th
   - **Account quota** — via the official endpoint `GET https://opencode.ai/zen/go/v1/usage`: percent used and reset countdown for the **5-hour / weekly / monthly** windows
   - **Local stats** — sessions, total cost, input / output / reasoning / cache tokens, **cache hit rate**, per-model breakdown, recent sessions, **today's usage**
   - **Four number units** — Raw / 万 (10⁴) / 千万 (10⁷) / 亿 (10⁸), one click to switch
-- **WebUI (on by default)** — launch OpenCode, run the health check and view usage from a browser
+- **WebUI (on by default)** — **launch / stop** OpenCode, run the health check and view usage from a browser
+- **Window size & position memory** — reopens where you left it
+- **Log export** — save the full test/launch record to a txt file with one click
 - **Dark / light theme** + **Chinese / English** — follows the system on first run, toggle in the title bar, remembered
 - **Zero system footprint** — no registry writes, no system proxy changes, no effect on other programs
 
@@ -304,6 +309,7 @@ The title bar toggles **language** (中 / EN) and **theme** (dark / light), foll
 From the page you can:
 
 - **Launch OpenCode** — identical to the button in the app (same env vars + liveness check)
+- **Stop OpenCode** — asks the windows to close first; terminates the processes after 2 s if they're still up
 - **Test the proxy** — see the exit IP and country through the proxy
 - **View usage** — account quota and local stats, with the **Raw / 万 / 千万 / 亿** unit switch
 
@@ -344,7 +350,8 @@ Windows environment variable names are **case-insensitive**, so this overrides a
 ```
 opencode-proxy-launcher/
 ├── OpenCodeProxyLauncher.csproj   net10.0-windows + WPF
-├── App.xaml / App.xaml.cs         entry point (+ --shot screenshot mode)
+├── app.ico                        application icon
+├── App.xaml / App.xaml.cs         entry point
 ├── MainWindow.xaml / .xaml.cs     main window (Settings / Usage / Log tabs)
 ├── Theme.xaml                     styles (all colors via DynamicResource)
 ├── ThemeLight.xaml / ThemeDark.xaml   two palettes
@@ -411,12 +418,16 @@ dotnet publish -c Release -r win-x64 \
 1. `--self-contained false` on the command line is *ignored* by .NET 10 and still produces a huge self-contained bundle. Use `-p:SelfContained=false`.
 2. WPF native libraries (`wpfgfx_cor3.dll`, `PresentationNative_cor3.dll`, …) are **not bundled into the single file by default** — without `IncludeNativeLibrariesForSelfExtract=true` you get 5 extra DLLs next to the exe.
 
-### Generating screenshots
+## OpenCode version compatibility
 
-```bash
-# arg 2 is the output path; optional arg 3: 0 = Settings, 1 = Usage, 2 = Log
-OpenCode-ProxyLauncher.exe --shot docs/ui.png 1
-```
+- **Verified against**: OpenCode desktop **v1.18.35** — the latest official release in
+  [`anomalyco/opencode`](https://github.com/anomalyco/opencode) (2026-10-06)
+  - Default install path: `%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe`
+- **About OpenCode v2**: v2 has been announced on the website, but there is no official v2 release tag yet.
+  This launcher only does one thing — **injects env vars when creating the process** — which is
+  independent of OpenCode's own version, so it works with both v1 and v2 as long as the desktop app
+  still reads environment variables at startup. If v2 moves the install location, use
+  "Auto detect" or "Browse…" to point at the new path.
 
 ## FAQ
 
@@ -460,9 +471,6 @@ The launcher waits 3.5 s and reports clearly if the process died. When this happ
 
 - [ ] **macOS support** — the env-var injection logic is identical; needs the WPF UI ported to Avalonia or MAUI, plus `.app` bundle launching
 - [ ] **Linux support** — same as above; also replace the `winsqlite3.dll` approach with the system SQLite
-- [ ] Remember window size / position
-- [ ] Export log button
-- [ ] "Stop OpenCode" in the WebUI
 
 ## Credits
 
