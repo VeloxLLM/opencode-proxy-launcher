@@ -129,7 +129,7 @@ opencode-proxy-launcher/
 ├── Strings.cs                     中英文文案表
 ├── Units.cs                       数字单位（默认 / 万 / 千万 / 亿）
 ├── WebUiServer.cs                 内置 WebUI（TcpListener 实现的迷你 HTTP 服务）
-├── UsageReader.cs                 读取本地用量统计（message + session 表）
+├── UsageReader.cs                 读取本地用量统计（自动识别 v2/v1 数据表）
 ├── AccountUsageReader.cs          调用官方接口读取账户额度
 ├── Sqlite.cs                      winsqlite3.dll 的只读 P/Invoke 封装
 ├── AppSettings.cs                 设置持久化 + 路径自动探测
@@ -190,11 +190,14 @@ dotnet publish -c Release -r win-x64 \
 
 ## OpenCode 版本兼容性
 
-- **已实测验证**：OpenCode 桌面版 **v1.18.35**（官方仓库 [`anomalyco/opencode`](https://github.com/anomalyco/opencode) 目前最新的正式 release，2026-10-06）
-  - 本机安装路径：`%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe`
-- **关于 OpenCode v2**：官网已预告 v2，但截至目前官方仓库还没有 v2 的正式 release tag。
-  本启动器只做一件事 —— **创建进程时注入环境变量**，与 OpenCode 自身的版本无关；
-  因此 v1 / v2 通用，只要桌面版仍然是"启动时读环境变量"这个机制。
+- **v2.0 起原生支持 OpenCode v2**：已核对 **v2.3.0** 的本地数据库结构。
+  v2 把会话写到 `session_v2`、消息写到 `session_message` / `session_part`，
+  模型信息也从 `data.providerID` / `data.modelID` 改为 `data.model.providerID` / `data.model.id`。
+  用量面板会自动检测 schema 并选择正确的数据表，无需任何配置。
+- **同时兼容 v1**：早期版本使用 `message` / `session` 表，仍按原逻辑读取。
+- **已实测验证**：OpenCode 桌面版 **v1.18.35**，安装路径
+  `%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe`
+- 启动器本身只负责**创建进程时注入环境变量**，与 OpenCode 版本无关；
   若 v2 换了安装目录，用界面里的「自动检测」或「浏览...」重新指定即可。
 
 ## 常见问题
@@ -226,7 +229,7 @@ dotnet publish -c Release -r win-x64 \
 **Q：用量数据是从哪来的？**
 
 - **账户额度**：官方接口 `GET https://opencode.ai/zen/go/v1/usage`，用 `~/.local/share/opencode/auth.json` 里 `opencode-go` 的 key 鉴权。
-- **本地统计**：只读 `~/.local/share/opencode/opencode.db`。累计与今日用量取自 **`message` 表**（逐条消息）—— 注意用 `session.time_created` 会把"昨天创建、今天还在用"的会话算到昨天，导致今日恒为 0。
+- **本地统计**：只读 `~/.local/share/opencode/opencode.db`。逐条消息统计：v1 用 `message`，v2 用 `session_message`，程序自动识别；会话数 / 最近会话同理取 `session` 或 `session_v2`。不能用 `session.time_created` 算"今日"，否则会恒为 0。
 
 ## 已知限制
 
@@ -359,7 +362,7 @@ opencode-proxy-launcher/
 ├── Strings.cs                     Chinese + English string table
 ├── Units.cs                       number units (raw / 万 / 千万 / 亿)
 ├── WebUiServer.cs                 built-in WebUI (mini HTTP over TcpListener)
-├── UsageReader.cs                 reads local usage (message + session tables)
+├── UsageReader.cs                 reads local usage (auto-detects v2/v1 tables)
 ├── AccountUsageReader.cs          calls the official quota endpoint
 ├── Sqlite.cs                      read-only P/Invoke wrapper over winsqlite3.dll
 ├── AppSettings.cs                 settings persistence + app path detection
@@ -420,14 +423,16 @@ dotnet publish -c Release -r win-x64 \
 
 ## OpenCode version compatibility
 
-- **Verified against**: OpenCode desktop **v1.18.35** — the latest official release in
-  [`anomalyco/opencode`](https://github.com/anomalyco/opencode) (2026-10-06)
-  - Default install path: `%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe`
-- **About OpenCode v2**: v2 has been announced on the website, but there is no official v2 release tag yet.
-  This launcher only does one thing — **injects env vars when creating the process** — which is
-  independent of OpenCode's own version, so it works with both v1 and v2 as long as the desktop app
-  still reads environment variables at startup. If v2 moves the install location, use
-  "Auto detect" or "Browse…" to point at the new path.
+- **v2.0 adds native OpenCode v2 support**: verified against the **v2.3.0** local database schema.
+  v2 stores sessions in `session_v2` and messages in `session_message` / `session_part`; provider and
+  model IDs moved from `data.providerID` / `data.modelID` into `data.model.providerID` / `data.model.id`.
+  The usage panel detects the schema automatically — no configuration needed.
+- **v1 remains supported**: older databases with `message` / `session` are read with the original queries.
+- **Verified against**: OpenCode desktop **v1.18.35**, installed at
+  `%LOCALAPPDATA%\Programs\@opencode-aidesktop\OpenCode.exe`
+- The launcher itself only **injects env vars when creating the process**, which is independent of
+  OpenCode's version. If v2 moves the install location, use "Auto detect" or "Browse…" to point at
+  the new path.
 
 ## FAQ
 
@@ -458,7 +463,7 @@ The launcher waits 3.5 s and reports clearly if the process died. When this happ
 **Q: Where does the usage data come from?**
 
 - **Account quota**: the official endpoint `GET https://opencode.ai/zen/go/v1/usage`, authenticated with the `opencode-go` key from `~/.local/share/opencode/auth.json`.
-- **Local stats**: read-only access to `~/.local/share/opencode/opencode.db`. Totals and today's usage come from the **`message` table** (per-message records) — using `session.time_created` would count a session created yesterday but still active today as "yesterday", making today's usage always 0.
+- **Local stats**: read-only access to `~/.local/share/opencode/opencode.db`. Per-message totals come from `message` (v1) or `session_message` (v2), detected automatically; session counts and recent sessions use `session` or `session_v2` accordingly. Using `session.time_created` for "today" would make it always 0.
 
 ## Known limitations
 

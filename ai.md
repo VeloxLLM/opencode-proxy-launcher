@@ -6,10 +6,9 @@
 
 ### 尚未完成 / 待办
 
-- [ ] 发 v0.4 的 GitHub Release：打 tag `v0.4`，把 `dist\OpenCode-ProxyLauncher.exe` 作为附件上传（文案见 `GITHUB.md`）
+- [ ] 用 OpenCode v2 桌面版实测一次「启动 + 用量面板」，确认 v2 schema 分支在真实 GUI 环境下可用
 - [ ] **支持 macOS** —— 环境变量注入逻辑可复用；需要把 WPF 换成 Avalonia / MAUI，并处理 `.app` 包启动
 - [ ] **支持 Linux** —— 同上；另外 `winsqlite3.dll` 那套要换成系统 SQLite（或内嵌 sqlite 库）
-- [ ] 补 `LICENSE` 文件（README 声明 MIT，但仓库里还没有这个文件）
 - [ ] 可选：把「检测代理」依赖的 `ip-api.com` 做成可配置（部分地区访问不稳）
 - [ ] 可选：检测结果行内着色
 
@@ -30,7 +29,10 @@
     不能用 `session.time_created` —— 一个会话可能昨天创建、今天还在用，用 session 表会让"今日"恒为 0。
 11. `opencode stats` 这个 CLI 命令在本机会报数据库查询错误（CLI 与 DB schema 不匹配），别指望它。
 12. 用 `--shot` 连续截多张图时，**每张之间要 sleep 足够久**（≥8 秒），否则多个实例重叠会串图。
-13. 不要擅自 `git push`，提交推送前先问。
+13. 不要擅自 `git push`；本次用户已明确要求提交并发布 v2.0 Release。
+14. **OpenCode v2 用量统计**：v2 会话在 `session_v2`，消息在 `session_message` / `session_part`；
+    assistant 用 `type='assistant'` 判定，provider/model 在 `data.model.providerID` / `data.model.id`。
+    `UsageReader.cs` 通过 `sqlite_master` 自动选择 v2 / v1 查询，改统计口径时两边都要核对。
 
 ## 二、历史记录（我们做了什么、怎么做的）
 
@@ -69,14 +71,21 @@
     csproj 里 `<ApplicationIcon>app.ico</ApplicationIcon>`。
   - README 新增「OpenCode 版本兼容性」：实测 **v1.18.35**（官方仓库是 **`anomalyco/opencode`**，不是 sst）；
     v2 官网已预告但暂无正式 release tag；启动器与 OpenCode 版本无关。
+- **2026-11-23 — v2.0.0**：
+  - 核对本机 **opencode v2.3.0** 的 `opencode.db`：v2 会话在 `session_v2`，消息在 `session_message` / `session_part`，
+    v1 的 `session` / `message` 仍保留历史记录。
+  - `UsageReader.cs` 新增 schema 自动检测：v2 用 `type='assistant'` 与 `data.model.*`，
+    会话统计 / 最近会话改用 `session_v2`；v1 查询保持原样。
+  - `Sqlite.cs` 不变（仍是只读 P/Invoke）；`dotnet build -c Release` 通过，0 warning / 0 error。
+  - csproj 版本改为 `2.0.0`；补齐 MIT `LICENSE`；README / GITHUB.md / 本文件同步更新兼容性说明。
 
 当前仓库状态：
 
 ```text
 opencode-proxy-launcher/
 ├── .gitignore
-├── OpenCodeProxyLauncher.csproj       net10.0-windows + WPF，Version 0.3
-├── App.xaml / App.xaml.cs             入口 + --shot 截图模式 + 语言/主题初始化
+├── OpenCodeProxyLauncher.csproj       net10.0-windows + WPF，Version 2.0.0
+├── App.xaml / App.xaml.cs             入口 + 语言/主题初始化
 ├── MainWindow.xaml / .xaml.cs         主界面 + 入场动效 + 启动存活确认 + WebUI 托管
 ├── Theme.xaml                         样式（颜色全走 DynamicResource）
 ├── ThemeLight.xaml / ThemeDark.xaml   两套调色板
@@ -84,13 +93,13 @@ opencode-proxy-launcher/
 ├── Strings.cs                         中英文文案表
 ├── Units.cs                           数字单位（默认 / 万 / 千万 / 亿）
 ├── WebUiServer.cs                     内置 WebUI（TcpListener 迷你 HTTP 服务）
-├── UsageReader.cs                     读取本地用量统计（message + session 表）
+├── UsageReader.cs                     读取本地用量统计（自动识别 v2/v1 数据表）
 ├── AccountUsageReader.cs              调官方接口读账户额度
 ├── Sqlite.cs                          winsqlite3.dll 只读 P/Invoke 封装
 ├── AppSettings.cs                     %APPDATA%\OpenCodeProxyLauncher\settings.json
 ├── Launcher.cs                        注入环境变量并启动 OpenCode
 ├── ProxyChecker.cs                    代理体检逻辑
-├── README.md / GITHUB.md / ai.md
+├── README.md / GITHUB.md / ai.md / LICENSE
 ├── dist\OpenCode-ProxyLauncher.exe    发布产物（单文件，构建后生成）
 └── docs\ui-light.png · ui-dark.png · ui-en.png · webui.png
 ```

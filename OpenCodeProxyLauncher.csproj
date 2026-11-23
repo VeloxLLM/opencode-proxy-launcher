@@ -13,7 +13,9 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Product>OpenCode Proxy Launcher</Product>
     <AssemblyTitle>OpenCode 代理启动器</AssemblyTitle>
-    <Version>0.1</Version>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
 
 </Project>

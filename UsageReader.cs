@@ -46,7 +46,10 @@ namespace OpenCodeProxyLauncher
 
         public string Database { get; set; }
 
-        // ---- 累计（来自 message 表，逐条消息的权威记录）----
+        /// <summary>实际读取到的 schema："v2" (session_message/session_v2) 或 "v1"。</summary>
+        public string Schema { get; set; }
+
+        // ---- 累计（来自逐条消息表，v1=message / v2=session_message）----
         public long Messages { get; set; }
 
         public long Sessions { get; set; }
@@ -89,15 +92,19 @@ namespace OpenCodeProxyLauncher
     /// 读取 OpenCode 本地用量统计。
     ///
     /// 数据来源：~/.local/share/opencode/opencode.db
-    /// - `message` 表：逐条消息的 cost / tokens（含 input / output / reasoning / cache），
-    ///   这是最细的粒度，**按天统计必须用它** —— 用 session.time_created 会把
-    ///   "昨天创建、今天还在用"的会话算成昨天，导致"今日"永远是 0。
-    /// - `session` 表：会话标题、会话数、最近会话列表。
+    /// - v1：`message` / `session`
+    /// - v2：`session_message` / `session_v2`（OpenCode 2.x 当前写入的表）
+    ///
+    /// 逐条消息的 cost / tokens（含 input / output / reasoning / cache）是最细粒度，
+    /// **按天统计必须用它** —— 用 session.time_created 会把
+    /// "昨天创建、今天还在用"的会话算成昨天，导致"今日"永远是 0。
     /// </summary>
     internal static class UsageReader
     {
-        /// <summary>只统计 assistant 消息，user 消息没有用量。</summary>
+        /// <summary>v1 只统计 assistant 消息；v2 用 type 列，data 里没有 role。</summary>
         private const string AssistantOnly = "json_extract(data,'$.role')='assistant'";
+
+        private const string AssistantOnlyV2 = "type = 'assistant'";
 
         public static string DatabasePath
         {
@@ -134,11 +141,14 @@ namespace OpenCodeProxyLauncher
                     return report;
                 }
 
-                ReadTotals(report, path);
-                ReadToday(report, path);
-                ReadModels(report, path);
-                ReadSessionSummary(report, path);
-                ReadRecent(report, path);
+                bool v2 = IsV2(path);
+                report.Schema = v2 ? "v2" : "v1";
+
+                ReadTotals(report, path, v2);
+                ReadToday(report, path, v2);
+                ReadModels(report, path, v2);
+                ReadSessionSummary(report, path, v2);
+                ReadRecent(report, path, v2);
 
                 report.Ok = true;
             }
@@ -150,7 +160,16 @@ namespace OpenCodeProxyLauncher
             return report;
         }
 
-        private static void ReadTotals(UsageReport report, string path)
+        /// <summary>检查 v2 的消息表是否存在；存在即以 v2 schema 读取。</summary>
+        private static bool IsV2(string path)
+        {
+            List<object[]> rows = Sqlite.Query(
+                path,
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_message' LIMIT 1");
+            return rows.Count > 0;
+        }
+
+        private static void ReadTotals(UsageReport report, string path, bool v2)
         {
             List<object[]> rows = Sqlite.Query(
                 path,
@@ -160,7 +179,8 @@ namespace OpenCodeProxyLauncher
                 + "IFNULL(SUM(json_extract(data,'$.tokens.reasoning')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.cache.read')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.cache.write')),0) "
-                + "FROM message WHERE " + AssistantOnly);
+                + "FROM " + (v2 ? "session_message" : "message")
+                + " WHERE " + (v2 ? AssistantOnlyV2 : AssistantOnly));
 
             if (rows.Count == 0)
             {
@@ -177,7 +197,7 @@ namespace OpenCodeProxyLauncher
             report.CacheWrite = ToLong(r, 6);
         }
 
-        private static void ReadToday(UsageReport report, string path)
+        private static void ReadToday(UsageReport report, string path, bool v2)
         {
             long since = new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
 
@@ -187,7 +207,8 @@ namespace OpenCodeProxyLauncher
                 + "IFNULL(SUM(json_extract(data,'$.tokens.input')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.output')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.reasoning')),0) "
-                + "FROM message WHERE " + AssistantOnly
+                + "FROM " + (v2 ? "session_message" : "message")
+                + " WHERE " + (v2 ? AssistantOnlyV2 : AssistantOnly)
                 + " AND time_created >= " + since.ToString(CultureInfo.InvariantCulture));
 
             if (rows.Count == 0)
@@ -203,15 +224,18 @@ namespace OpenCodeProxyLauncher
             report.TodayReasoning = ToLong(r, 4);
         }
 
-        private static void ReadModels(UsageReport report, string path)
+        private static void ReadModels(UsageReport report, string path, bool v2)
         {
+            string providerExpr = v2 ? "json_extract(data,'$.model.providerID')" : "json_extract(data,'$.providerID')";
+            string modelExpr = v2 ? "json_extract(data,'$.model.id')" : "json_extract(data,'$.modelID')";
             List<object[]> rows = Sqlite.Query(
                 path,
-                "SELECT json_extract(data,'$.providerID'), json_extract(data,'$.modelID'), "
+                "SELECT " + providerExpr + ", " + modelExpr + ", "
                 + "COUNT(*), IFNULL(SUM(json_extract(data,'$.cost')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.input')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.output')),0) "
-                + "FROM message WHERE " + AssistantOnly + " GROUP BY 1, 2 "
+                + "FROM " + (v2 ? "session_message" : "message")
+                + " WHERE " + (v2 ? AssistantOnlyV2 : AssistantOnly) + " GROUP BY 1, 2 "
                 + "ORDER BY SUM(IFNULL(json_extract(data,'$.tokens.input'),0) "
                 + "+ IFNULL(json_extract(data,'$.tokens.output'),0)) DESC LIMIT 15");
 
@@ -229,9 +253,10 @@ namespace OpenCodeProxyLauncher
             }
         }
 
-        private static void ReadSessionSummary(UsageReport report, string path)
+        private static void ReadSessionSummary(UsageReport report, string path, bool v2)
         {
-            List<object[]> rows = Sqlite.Query(path, "SELECT COUNT(*) FROM session");
+            List<object[]> rows = Sqlite.Query(
+                path, "SELECT COUNT(*) FROM " + (v2 ? "session_v2" : "session"));
 
             if (rows.Count > 0)
             {
@@ -239,13 +264,14 @@ namespace OpenCodeProxyLauncher
             }
         }
 
-        private static void ReadRecent(UsageReport report, string path)
+        private static void ReadRecent(UsageReport report, string path, bool v2)
         {
             // 按最后活动时间排序：昨天创建、今天还在用的会话也会排在前面
             List<object[]> rows = Sqlite.Query(
                 path,
                 "SELECT title, model, IFNULL(cost,0), IFNULL(tokens_input,0), IFNULL(tokens_output,0), time_updated "
-                + "FROM session ORDER BY time_updated DESC LIMIT 12");
+                + "FROM " + (v2 ? "session_v2" : "session")
+                + " ORDER BY time_updated DESC LIMIT 12");
 
             foreach (object[] r in rows)
             {
