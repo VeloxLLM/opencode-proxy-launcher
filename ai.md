@@ -30,9 +30,9 @@
 11. `opencode stats` 这个 CLI 命令在本机会报数据库查询错误（CLI 与 DB schema 不匹配），别指望它。
 12. 用 `--shot` 连续截多张图时，**每张之间要 sleep 足够久**（≥8 秒），否则多个实例重叠会串图。
 13. 不要擅自 `git push`；本次用户已明确要求提交并发布 v2.0 Release。
-14. **OpenCode v2 用量统计**：v2 会话在 `session_v2`，消息在 `session_message` / `session_part`；
+14. **仅支持 OpenCode v2**：用量统计只用 `session_v2` / `session_message` / `session_part`；
     assistant 用 `type='assistant'` 判定，provider/model 在 `data.model.providerID` / `data.model.id`。
-    `UsageReader.cs` 通过 `sqlite_master` 自动选择 v2 / v1 查询，改统计口径时两边都要核对。
+    不要重新引入 `message` / `session` 的旧版查询分支；数据库缺少 v2 表时明确报错。
 
 ## 二、历史记录（我们做了什么、怎么做的）
 
@@ -72,12 +72,13 @@
   - README 新增「OpenCode 版本兼容性」：实测 **v1.18.35**（官方仓库是 **`anomalyco/opencode`**，不是 sst）；
     v2 官网已预告但暂无正式 release tag；启动器与 OpenCode 版本无关。
 - **2026-11-23 — v2.0.0**：
-  - 核对本机 **opencode v2.3.0** 的 `opencode.db`：v2 会话在 `session_v2`，消息在 `session_message` / `session_part`，
-    v1 的 `session` / `message` 仍保留历史记录。
-  - `UsageReader.cs` 新增 schema 自动检测：v2 用 `type='assistant'` 与 `data.model.*`，
-    会话统计 / 最近会话改用 `session_v2`；v1 查询保持原样。
+  - 核对本机 **opencode v2.3.0** 的 `opencode.db`：会话在 `session_v2`，消息在 `session_message` / `session_part`。
+  - `UsageReader.cs` 改为读取 v2 表，assistant 用 `type='assistant'`，provider/model 从 `data.model.*` 读取。
   - `Sqlite.cs` 不变（仍是只读 P/Invoke）；`dotnet build -c Release` 通过，0 warning / 0 error。
-  - csproj 版本改为 `2.0.0`；补齐 MIT `LICENSE`；README / GITHUB.md / 本文件同步更新兼容性说明。
+  - csproj 版本改为 `2.0.0`；补齐 MIT `LICENSE`；README / GITHUB.md / 本文件同步更新。
+- **2026-11-23 — v2-only 清理**：
+  - 移除 `UsageReader.cs` 中全部 v1 / schema 探测分支，固定使用 v2 表；缺少 v2 表时返回 `v2-schema-not-found`。
+  - README / GITHUB.md / 本文件统一改为「仅 OpenCode v2」。
 
 当前仓库状态：
 
@@ -93,7 +94,7 @@ opencode-proxy-launcher/
 ├── Strings.cs                         中英文文案表
 ├── Units.cs                           数字单位（默认 / 万 / 千万 / 亿）
 ├── WebUiServer.cs                     内置 WebUI（TcpListener 迷你 HTTP 服务）
-├── UsageReader.cs                     读取本地用量统计（自动识别 v2/v1 数据表）
+├── UsageReader.cs                     读取本地用量统计（仅 OpenCode v2）
 ├── AccountUsageReader.cs              调官方接口读账户额度
 ├── Sqlite.cs                          winsqlite3.dll 只读 P/Invoke 封装
 ├── AppSettings.cs                     %APPDATA%\OpenCodeProxyLauncher\settings.json

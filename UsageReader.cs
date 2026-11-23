@@ -46,10 +46,7 @@ namespace OpenCodeProxyLauncher
 
         public string Database { get; set; }
 
-        /// <summary>实际读取到的 schema："v2" (session_message/session_v2) 或 "v1"。</summary>
-        public string Schema { get; set; }
-
-        // ---- 累计（来自逐条消息表，v1=message / v2=session_message）----
+        // ---- 累计（来自 session_message，逐条消息的权威记录）----
         public long Messages { get; set; }
 
         public long Sessions { get; set; }
@@ -89,22 +86,23 @@ namespace OpenCodeProxyLauncher
     }
 
     /// <summary>
-    /// 读取 OpenCode 本地用量统计。
+    /// 读取 OpenCode v2 本地用量统计。
     ///
     /// 数据来源：~/.local/share/opencode/opencode.db
-    /// - v1：`message` / `session`
-    /// - v2：`session_message` / `session_v2`（OpenCode 2.x 当前写入的表）
+    /// - `session_message`：逐条消息的 cost / tokens（含 input / output / reasoning / cache）
+    /// - `session_v2`：会话标题、会话数、最近会话列表
     ///
-    /// 逐条消息的 cost / tokens（含 input / output / reasoning / cache）是最细粒度，
-    /// **按天统计必须用它** —— 用 session.time_created 会把
+    /// 按天统计必须用逐条消息表 —— 用 session_v2.time_created 会把
     /// "昨天创建、今天还在用"的会话算成昨天，导致"今日"永远是 0。
+    /// 本类不支持 OpenCode v1 数据格式。
     /// </summary>
     internal static class UsageReader
     {
-        /// <summary>v1 只统计 assistant 消息；v2 用 type 列，data 里没有 role。</summary>
-        private const string AssistantOnly = "json_extract(data,'$.role')='assistant'";
-
-        private const string AssistantOnlyV2 = "type = 'assistant'";
+        private const string MessageTable = "session_message";
+        private const string SessionTable = "session_v2";
+        private const string AssistantOnly = "type = 'assistant'";
+        private const string ProviderExpr = "json_extract(data,'$.model.providerID')";
+        private const string ModelExpr = "json_extract(data,'$.model.id')";
 
         public static string DatabasePath
         {
@@ -141,14 +139,21 @@ namespace OpenCodeProxyLauncher
                     return report;
                 }
 
-                bool v2 = IsV2(path);
-                report.Schema = v2 ? "v2" : "v1";
+                List<object[]> tables = Sqlite.Query(
+                    path,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                    + "AND name IN ('session_v2','session_message')");
+                if (tables.Count == 0 || ToLong(tables[0], 0) < 2)
+                {
+                    report.Error = "v2-schema-not-found";
+                    return report;
+                }
 
-                ReadTotals(report, path, v2);
-                ReadToday(report, path, v2);
-                ReadModels(report, path, v2);
-                ReadSessionSummary(report, path, v2);
-                ReadRecent(report, path, v2);
+                ReadTotals(report, path);
+                ReadToday(report, path);
+                ReadModels(report, path);
+                ReadSessionSummary(report, path);
+                ReadRecent(report, path);
 
                 report.Ok = true;
             }
@@ -160,16 +165,7 @@ namespace OpenCodeProxyLauncher
             return report;
         }
 
-        /// <summary>检查 v2 的消息表是否存在；存在即以 v2 schema 读取。</summary>
-        private static bool IsV2(string path)
-        {
-            List<object[]> rows = Sqlite.Query(
-                path,
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_message' LIMIT 1");
-            return rows.Count > 0;
-        }
-
-        private static void ReadTotals(UsageReport report, string path, bool v2)
+        private static void ReadTotals(UsageReport report, string path)
         {
             List<object[]> rows = Sqlite.Query(
                 path,
@@ -179,8 +175,7 @@ namespace OpenCodeProxyLauncher
                 + "IFNULL(SUM(json_extract(data,'$.tokens.reasoning')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.cache.read')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.cache.write')),0) "
-                + "FROM " + (v2 ? "session_message" : "message")
-                + " WHERE " + (v2 ? AssistantOnlyV2 : AssistantOnly));
+                + "FROM " + MessageTable + " WHERE " + AssistantOnly);
 
             if (rows.Count == 0)
             {
@@ -197,7 +192,7 @@ namespace OpenCodeProxyLauncher
             report.CacheWrite = ToLong(r, 6);
         }
 
-        private static void ReadToday(UsageReport report, string path, bool v2)
+        private static void ReadToday(UsageReport report, string path)
         {
             long since = new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
 
@@ -207,8 +202,7 @@ namespace OpenCodeProxyLauncher
                 + "IFNULL(SUM(json_extract(data,'$.tokens.input')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.output')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.reasoning')),0) "
-                + "FROM " + (v2 ? "session_message" : "message")
-                + " WHERE " + (v2 ? AssistantOnlyV2 : AssistantOnly)
+                + "FROM " + MessageTable + " WHERE " + AssistantOnly
                 + " AND time_created >= " + since.ToString(CultureInfo.InvariantCulture));
 
             if (rows.Count == 0)
@@ -224,18 +218,15 @@ namespace OpenCodeProxyLauncher
             report.TodayReasoning = ToLong(r, 4);
         }
 
-        private static void ReadModels(UsageReport report, string path, bool v2)
+        private static void ReadModels(UsageReport report, string path)
         {
-            string providerExpr = v2 ? "json_extract(data,'$.model.providerID')" : "json_extract(data,'$.providerID')";
-            string modelExpr = v2 ? "json_extract(data,'$.model.id')" : "json_extract(data,'$.modelID')";
             List<object[]> rows = Sqlite.Query(
                 path,
-                "SELECT " + providerExpr + ", " + modelExpr + ", "
+                "SELECT " + ProviderExpr + ", " + ModelExpr + ", "
                 + "COUNT(*), IFNULL(SUM(json_extract(data,'$.cost')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.input')),0), "
                 + "IFNULL(SUM(json_extract(data,'$.tokens.output')),0) "
-                + "FROM " + (v2 ? "session_message" : "message")
-                + " WHERE " + (v2 ? AssistantOnlyV2 : AssistantOnly) + " GROUP BY 1, 2 "
+                + "FROM " + MessageTable + " WHERE " + AssistantOnly + " GROUP BY 1, 2 "
                 + "ORDER BY SUM(IFNULL(json_extract(data,'$.tokens.input'),0) "
                 + "+ IFNULL(json_extract(data,'$.tokens.output'),0)) DESC LIMIT 15");
 
@@ -253,10 +244,10 @@ namespace OpenCodeProxyLauncher
             }
         }
 
-        private static void ReadSessionSummary(UsageReport report, string path, bool v2)
+        private static void ReadSessionSummary(UsageReport report, string path)
         {
             List<object[]> rows = Sqlite.Query(
-                path, "SELECT COUNT(*) FROM " + (v2 ? "session_v2" : "session"));
+                path, "SELECT COUNT(*) FROM " + SessionTable);
 
             if (rows.Count > 0)
             {
@@ -264,14 +255,13 @@ namespace OpenCodeProxyLauncher
             }
         }
 
-        private static void ReadRecent(UsageReport report, string path, bool v2)
+        private static void ReadRecent(UsageReport report, string path)
         {
             // 按最后活动时间排序：昨天创建、今天还在用的会话也会排在前面
             List<object[]> rows = Sqlite.Query(
                 path,
                 "SELECT title, model, IFNULL(cost,0), IFNULL(tokens_input,0), IFNULL(tokens_output,0), time_updated "
-                + "FROM " + (v2 ? "session_v2" : "session")
-                + " ORDER BY time_updated DESC LIMIT 12");
+                + "FROM " + SessionTable + " ORDER BY time_updated DESC LIMIT 12");
 
             foreach (object[] r in rows)
             {
@@ -292,7 +282,7 @@ namespace OpenCodeProxyLauncher
             }
         }
 
-        /// <summary>session.model 列是 JSON：{"id":"...","providerID":"...","variant":"..."}</summary>
+        /// <summary>session_v2.model 列是 JSON：{"id":"...","providerID":"...","variant":"..."}</summary>
         private static void SplitModel(string raw, out string provider, out string model)
         {
             provider = "-";

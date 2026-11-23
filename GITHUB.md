@@ -15,7 +15,7 @@ opencode-proxy-launcher
 ## About / Description（填到「Edit repository details → Description」）
 
 ```
-让 OpenCode 桌面版稳定走本地代理的 Windows 启动器。OpenCode 只在进程启动时读环境变量；本工具自己注入正确的 HTTP_PROXY 后拉起它，并提供代理体检、账户额度与本地用量面板（兼容 OpenCode v1/v2），以及默认开启的 WebUI。不写注册表、不改系统代理。
+让 OpenCode 桌面版稳定走本地代理的 Windows 启动器。OpenCode 只在进程启动时读环境变量；本工具自己注入正确的 HTTP_PROXY 后拉起它，并提供代理体检、账户额度与本地用量面板（仅 OpenCode v2），以及默认开启的 WebUI。不写注册表、不改系统代理。
 ```
 
 ## Topics
@@ -50,9 +50,8 @@ opencode-v2
 
 ### 改动
 
-- **支持 OpenCode v2 用量数据** —— 自动识别 `session_message` / `session_v2` 与旧版 `message` / `session`
+- **用量面板改为仅支持 OpenCode v2** —— 只读取 `session_message` / `session_v2`
 - **适配 v2 消息结构** —— assistant 由 `type` 列判定，provider/model 从 `data.model` 读取
-- **保留 v1 兼容** —— 旧版数据库无需迁移，统计口径不变
 - **补齐 MIT LICENSE**，版本号统一为 2.0.0
 
 ### 下载
@@ -79,7 +78,7 @@ opencode-v2
 ## About / Description (paste into "Edit repository details → Description")
 
 ```
-A Windows launcher that makes the OpenCode desktop app use your local proxy. OpenCode reads HTTP_PROXY/HTTPS_PROXY only at process start, so a stale parent environment breaks it. This tool injects the right env vars itself, plus a proxy health check, an account-quota & local-usage panel (OpenCode v1/v2), and a built-in WebUI.
+A Windows launcher that makes the OpenCode desktop app use your local proxy. OpenCode reads HTTP_PROXY/HTTPS_PROXY only at process start, so a stale parent environment breaks it. This tool injects the right env vars itself, plus a proxy health check, an account-quota & local-usage panel (OpenCode v2 only), and a built-in WebUI.
 ```
 
 ## Bilingual variant (中英双语版，如果描述栏想两种语言都放)
@@ -121,9 +120,8 @@ A Windows launcher that makes the OpenCode desktop app use your local proxy.
 
 ### Changes
 
-- **OpenCode v2 usage data** — auto-detects `session_message` / `session_v2` versus legacy `message` / `session`
+- **Usage panel is OpenCode v2 only** — reads `session_message` / `session_v2` exclusively
 - **v2 message layout** — assistant messages identified by the `type` column; provider/model read from `data.model`
-- **v1 still supported** — older databases need no migration and keep the same accounting
 - **MIT LICENSE added**, version aligned to 2.0.0
 
 ### Download
