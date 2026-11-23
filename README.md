@@ -1,22 +1,252 @@
 <div align="center">
 
-# OpenCode 代理启动器
+# OpenCode Proxy Launcher
 
-**让 OpenCode 桌面版稳定走本地代理的 Windows 启动器**
+**A Windows launcher that makes the OpenCode desktop app use your local proxy.**
 
-A Windows launcher that makes the OpenCode desktop app use your local proxy.
+让 OpenCode 桌面版稳定走本地代理的 Windows 启动器。
 
 [![Release](https://img.shields.io/github/v/release/VeloxLLM/opencode-proxy-launcher?label=release&color=4c6fff)](https://github.com/VeloxLLM/opencode-proxy-launcher/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-4c6fff)](#)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](#)
 [![UI](https://img.shields.io/badge/UI-WPF-4c6fff)](#)
 [![i18n](https://img.shields.io/badge/i18n-中文%20%7C%20English-16b364)](#)
-[![License](https://img.shields.io/badge/license-MIT-16b364)](#许可--license)
-[![Built with DeepSeek V4.1 Flash](https://img.shields.io/badge/built%20with-DeepSeek%20V4.1%20Flash-4c6fff)](#致谢--credits)
+[![License](https://img.shields.io/badge/license-MIT-16b364)](#license)
+[![Built with DeepSeek V4.1 Flash](https://img.shields.io/badge/built%20with-DeepSeek%20V4.1%20Flash-4c6fff)](#credits)
 
-[中文](#中文) · [English](#english)
+[English](#english) · [中文](#中文)
 
 </div>
+
+---
+
+# English
+
+## What it solves
+
+The OpenCode desktop app has **no built-in proxy setting**. It reads the proxy from environment variables **only at process start** — and both the main process and the backend sidecar it forks read it once each:
+
+```js
+// Inside the OpenCode desktop app (main process and sidecar, same logic)
+function useEnvProxy() {
+  http.setGlobalProxyFromEnv();   // reads HTTP_PROXY / HTTPS_PROXY / NO_PROXY
+}
+```
+
+The trap is *who launches it*. The process that creates OpenCode may be Explorer, a Start-menu host, an old terminal, or an IDE — these **often carry a stale environment**, or one polluted by another program's proxy variables. OpenCode inherits that wrong environment and sends requests directly.
+
+For region-restricted models (e.g. some `opencode-go` models) the symptom is unmistakable:
+
+```
+AI_APICallError: This model is not available in your country
+```
+
+This tool does the obvious thing: **it sets the environment variables itself, then creates the OpenCode process**. No dependency on any host process, and no system-wide changes.
+
+## Features
+
+- **One-click launch** — starts OpenCode with the right proxy env vars, affecting only that child process
+- **Post-launch liveness check** — waits 3.5 s and reports clearly if the process died immediately instead of pretending success
+- **Proxy health check** — port listening / **exit IP and country through the proxy** / HTTPS reachability / app path
+- **Usage panel (in both the GUI and the WebUI)**
+  - **Account quota** — via the official endpoint `GET https://opencode.ai/zen/go/v1/usage`: percent used and reset countdown for the **5-hour / weekly / monthly** windows
+  - **Local stats** — sessions, total cost, input / output / reasoning / cache tokens, **cache hit rate**, per-model breakdown, recent sessions, **today's usage**
+  - **Four number units** — Raw / 万 (10⁴) / 千万 (10⁷) / 亿 (10⁸), one click to switch
+- **WebUI (on by default)** — **launch / stop** OpenCode, run the health check and view usage from a browser
+- **Window size & position memory** — reopens where you left it
+- **Log export** — save the full test/launch record to a txt file with one click
+- **Dark / light theme** + **Chinese / English** — follows the system on first run, toggle in the title bar, remembered
+- **Zero system footprint** — no registry writes, no system proxy changes, no effect on other programs
+
+> About the three windows: the official docs state *"Each model has the following usage limits: 5-hour — 20% of the monthly limit; weekly — 50%; and monthly — 100%."* They are **the same monthly allowance measured over three horizons**, computed **per model**.
+
+## UI
+
+The main window has three tabs:
+
+- **Settings** — proxy URL, OpenCode path, no-proxy list, WebUI toggle and port, "close after launch"
+- **Usage** — account quota (5-hour / weekly / monthly + reset countdown) and local stats (sessions, cost, token types, cache hit rate, per-model breakdown, recent sessions, today), with **Raw / 10⁴ / 10⁷ / 10⁸** unit switching in the top-right
+- **Log** — full output of proxy tests and launches
+
+Four buttons (Launch OpenCode / Test proxy / Save settings / Clear log) and the status dot are always pinned at the bottom.
+
+The title bar toggles **language** (中 / EN) and **theme** (dark / light), following the system on first run.
+
+## WebUI
+
+**On by default.** Default port is `8710`; click "Open" to use it in a browser. Uncheck to turn it off.
+
+From the page you can:
+
+- **Launch OpenCode** — identical to the button in the app (same env vars + liveness check)
+- **Stop OpenCode** — asks the windows to close first; terminates the processes after 2 s if they're still up
+- **Test the proxy** — see the exit IP and country through the proxy
+- **View usage** — account quota and local stats, with the **Raw / 万 / 千万 / 亿** unit switch
+
+**Security**: it binds to `127.0.0.1` only. Every `/api/*` request requires a token, and the token is only rendered into the server-side page — a cross-origin page can read neither the page nor the token, which blocks CSRF.
+
+## Quick start
+
+1. Download `OpenCode-ProxyLauncher.exe` from [Releases](https://github.com/VeloxLLM/opencode-proxy-launcher/releases)
+2. Double-click it
+3. On the **Settings** tab, confirm **Proxy URL** (default `http://127.0.0.1:2080`) and the OpenCode path
+4. Click **Test proxy** and make sure the exit country is **not** China
+5. Click **Launch OpenCode**
+
+> The release build is **single-file and self-contained** — one exe, **no .NET runtime required**.
+
+## How it works
+
+The core is a few lines: create the process with `UseShellExecute = false` and write the proxy into the child's environment block.
+
+```csharp
+var startInfo = new ProcessStartInfo(settings.OpenCodePath)
+{
+    UseShellExecute = false,   // must be false for EnvironmentVariables to apply
+};
+
+startInfo.EnvironmentVariables["HTTP_PROXY"]  = proxy;
+startInfo.EnvironmentVariables["HTTPS_PROXY"] = proxy;
+startInfo.EnvironmentVariables["ALL_PROXY"]   = proxy;
+startInfo.EnvironmentVariables["NO_PROXY"]    = settings.NoProxy;
+
+Process.Start(startInfo);
+```
+
+Windows environment variable names are **case-insensitive**, so this overrides any stale value inherited from the parent — that is exactly why this approach is reliable.
+
+## Project layout
+
+```
+opencode-proxy-launcher/
+├── OpenCodeProxyLauncher.csproj   net10.0-windows + WPF
+├── app.ico                        application icon
+├── App.xaml / App.xaml.cs         entry point
+├── MainWindow.xaml / .xaml.cs     main window (Settings / Usage / Log tabs)
+├── Theme.xaml                     styles (all colors via DynamicResource)
+├── ThemeLight.xaml / ThemeDark.xaml   two palettes
+├── ThemeManager.cs                runtime theme switching / follow system
+├── Strings.cs                     Chinese + English string table
+├── Units.cs                       number units (raw / 万 / 千万 / 亿)
+├── WebUiServer.cs                 built-in WebUI (mini HTTP over TcpListener)
+├── UsageReader.cs                 reads local usage (OpenCode v2 only)
+├── AccountUsageReader.cs          calls the official quota endpoint
+├── Sqlite.cs                      read-only P/Invoke wrapper over winsqlite3.dll
+├── AppSettings.cs                 settings persistence + app path detection
+├── Launcher.cs                    injects env vars and starts OpenCode
+├── ProxyChecker.cs                proxy health check
+├── ai.md                          AI handover document (Chinese)
+```
+
+## Configuration
+
+`%APPDATA%\OpenCodeProxyLauncher\settings.json`
+
+```json
+{
+  "ProxyUrl": "http://127.0.0.1:2080",
+  "OpenCodePath": "C:\\Users\\you\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe",
+  "NoProxy": "127.0.0.1,localhost,::1",
+  "CloseAfterLaunch": false,
+  "DarkMode": null,
+  "Language": null,
+  "WebUiEnabled": true,
+  "WebUiPort": 8710,
+  "WebUiToken": "(auto-generated)",
+  "NumberUnit": "raw"
+}
+```
+
+`DarkMode` / `Language` set to `null` means "follow the system"; `NumberUnit` is one of `raw` / `wan` / `qianwan` / `yi`.
+
+## Build from source
+
+```bash
+git clone https://github.com/VeloxLLM/opencode-proxy-launcher.git
+cd opencode-proxy-launcher
+
+# (1) Single-file, self-contained (recommended) — one exe, no .NET needed, ~62 MB
+dotnet publish -c Release -r win-x64 \
+  -p:SelfContained=true -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:EnableCompressionInSingleFile=true \
+  -p:DebugType=none -p:DebugSymbols=false -o dist
+
+# (2) Single-file, framework-dependent — ~200 KB, needs .NET 10 Desktop Runtime
+dotnet publish -c Release -r win-x64 \
+  -p:SelfContained=false -p:PublishSingleFile=true \
+  -p:DebugType=none -p:DebugSymbols=false -o dist
+```
+
+| Variant | Output | Size | Needs .NET |
+| --- | --- | --- | --- |
+| (1) Self-contained | one exe | ~62 MB | ❌ No |
+| (2) Framework-dependent | one exe | ~200 KB | ✅ .NET 10 Desktop Runtime |
+
+**Two easy-to-hit pitfalls:**
+
+1. `--self-contained false` on the command line is *ignored* by .NET 10 and still produces a huge self-contained bundle. Use `-p:SelfContained=false`.
+2. WPF native libraries (`wpfgfx_cor3.dll`, `PresentationNative_cor3.dll`, …) are **not bundled into the single file by default** — without `IncludeNativeLibrariesForSelfExtract=true` you get 5 extra DLLs next to the exe.
+
+## OpenCode version compatibility
+
+- **OpenCode v2 only**: verified against the **v2.3.0** local database schema.
+  The usage panel reads `session_v2` / `session_message` / `session_part`, and provider/model IDs
+  from `data.model.providerID` / `data.model.id`. A database without v2 tables reports an error.
+- The launcher itself only **injects env vars when creating the process**, which is independent of
+  OpenCode's version. If the install location changes, use "Auto detect" or "Browse…" to point at
+  the new path.
+
+## FAQ
+
+**Q: Why not just inject a DLL?**
+
+Environment variables are read **at process start**, and OpenCode's backend sidecar is a **separate child process** forked via Electron's `utilityProcess.fork()`. Injecting into the main process afterwards cannot change an already-running process's environment, let alone the child's.
+
+**Q: I already set system/user environment variables — do I still need this?**
+
+If whatever launches OpenCode can see them, no. But the process that actually creates the child on Windows often carries a **stale environment**, which is the root of the problem.
+
+**Q: Does it affect other programs?**
+
+No. The environment variables are set only for this one child process. No registry writes, no system proxy changes.
+
+**Q: Does it support SOCKS5?**
+
+The field takes an HTTP proxy URL. Clash / Throne / v2rayN mixed or HTTP ports work as-is.
+
+**Q: Still getting the region error after launching?**
+
+Click **Test proxy** and check the **exit country**. If it says China, the proxy itself isn't working.
+
+**Q: I clicked "Launch OpenCode" but no window appeared.**
+
+The launcher waits 3.5 s and reports clearly if the process died. When this happens, the most likely cause is that **the launcher itself was started by another program in a restricted context** (e.g. from a sandbox). Close the window and **double-click the exe from File Explorer** instead.
+
+**Q: Where does the usage data come from?**
+
+- **Account quota**: the official endpoint `GET https://opencode.ai/zen/go/v1/usage`, authenticated with the `opencode-go` key from `~/.local/share/opencode/auth.json`.
+- **Local stats**: read-only access to `~/.local/share/opencode/opencode.db`. Only v2 tables (`session_message` / `session_v2`) are used. Using `session_v2.time_created` for "today" would make it always 0.
+
+## Known limitations
+
+- Windows only
+- Only launches the OpenCode **desktop app (GUI)**, not the CLI / TUI
+- The health check relies on `ip-api.com` (HTTP only on the free tier)
+- Usage stats rely on the system-provided `winsqlite3.dll` (present on Windows 10+)
+
+## Roadmap
+
+- [ ] **macOS support** — the env-var injection logic is identical; needs the WPF UI ported to Avalonia or MAUI, plus `.app` bundle launching
+- [ ] **Linux support** — same as above; also replace the `winsqlite3.dll` approach with the system SQLite
+
+## Credits
+
+Built by **DeepSeek V4.1 Flash** together with the author — from reverse-engineering OpenCode's proxy mechanism and pinpointing the subtle "stale launcher environment" trap, all the way to the WPF UI, the WebUI, the usage panel and this document.
+
+## License
+
+MIT
 
 ---
 
@@ -248,231 +478,3 @@ dotnet publish -c Release -r win-x64 \
 MIT
 
 ---
-
-# English
-
-## What it solves
-
-The OpenCode desktop app has **no built-in proxy setting**. It reads the proxy from environment variables **only at process start** — and both the main process and the backend sidecar it forks read it once each:
-
-```js
-// Inside the OpenCode desktop app (main process and sidecar, same logic)
-function useEnvProxy() {
-  http.setGlobalProxyFromEnv();   // reads HTTP_PROXY / HTTPS_PROXY / NO_PROXY
-}
-```
-
-The trap is *who launches it*. The process that creates OpenCode may be Explorer, a Start-menu host, an old terminal, or an IDE — these **often carry a stale environment**, or one polluted by another program's proxy variables. OpenCode inherits that wrong environment and sends requests directly.
-
-For region-restricted models (e.g. some `opencode-go` models) the symptom is unmistakable:
-
-```
-AI_APICallError: This model is not available in your country
-```
-
-This tool does the obvious thing: **it sets the environment variables itself, then creates the OpenCode process**. No dependency on any host process, and no system-wide changes.
-
-## Features
-
-- **One-click launch** — starts OpenCode with the right proxy env vars, affecting only that child process
-- **Post-launch liveness check** — waits 3.5 s and reports clearly if the process died immediately instead of pretending success
-- **Proxy health check** — port listening / **exit IP and country through the proxy** / HTTPS reachability / app path
-- **Usage panel (in both the GUI and the WebUI)**
-  - **Account quota** — via the official endpoint `GET https://opencode.ai/zen/go/v1/usage`: percent used and reset countdown for the **5-hour / weekly / monthly** windows
-  - **Local stats** — sessions, total cost, input / output / reasoning / cache tokens, **cache hit rate**, per-model breakdown, recent sessions, **today's usage**
-  - **Four number units** — Raw / 万 (10⁴) / 千万 (10⁷) / 亿 (10⁸), one click to switch
-- **WebUI (on by default)** — **launch / stop** OpenCode, run the health check and view usage from a browser
-- **Window size & position memory** — reopens where you left it
-- **Log export** — save the full test/launch record to a txt file with one click
-- **Dark / light theme** + **Chinese / English** — follows the system on first run, toggle in the title bar, remembered
-- **Zero system footprint** — no registry writes, no system proxy changes, no effect on other programs
-
-> About the three windows: the official docs state *"Each model has the following usage limits: 5-hour — 20% of the monthly limit; weekly — 50%; and monthly — 100%."* They are **the same monthly allowance measured over three horizons**, computed **per model**.
-
-## UI
-
-The main window has three tabs:
-
-- **Settings** — proxy URL, OpenCode path, no-proxy list, WebUI toggle and port, "close after launch"
-- **Usage** — account quota (5-hour / weekly / monthly + reset countdown) and local stats (sessions, cost, token types, cache hit rate, per-model breakdown, recent sessions, today), with **Raw / 10⁴ / 10⁷ / 10⁸** unit switching in the top-right
-- **Log** — full output of proxy tests and launches
-
-Four buttons (Launch OpenCode / Test proxy / Save settings / Clear log) and the status dot are always pinned at the bottom.
-
-The title bar toggles **language** (中 / EN) and **theme** (dark / light), following the system on first run.
-
-## WebUI
-
-**On by default.** Default port is `8710`; click "Open" to use it in a browser. Uncheck to turn it off.
-
-From the page you can:
-
-- **Launch OpenCode** — identical to the button in the app (same env vars + liveness check)
-- **Stop OpenCode** — asks the windows to close first; terminates the processes after 2 s if they're still up
-- **Test the proxy** — see the exit IP and country through the proxy
-- **View usage** — account quota and local stats, with the **Raw / 万 / 千万 / 亿** unit switch
-
-**Security**: it binds to `127.0.0.1` only. Every `/api/*` request requires a token, and the token is only rendered into the server-side page — a cross-origin page can read neither the page nor the token, which blocks CSRF.
-
-## Quick start
-
-1. Download `OpenCode-ProxyLauncher.exe` from [Releases](https://github.com/VeloxLLM/opencode-proxy-launcher/releases)
-2. Double-click it
-3. On the **Settings** tab, confirm **Proxy URL** (default `http://127.0.0.1:2080`) and the OpenCode path
-4. Click **Test proxy** and make sure the exit country is **not** China
-5. Click **Launch OpenCode**
-
-> The release build is **single-file and self-contained** — one exe, **no .NET runtime required**.
-
-## How it works
-
-The core is a few lines: create the process with `UseShellExecute = false` and write the proxy into the child's environment block.
-
-```csharp
-var startInfo = new ProcessStartInfo(settings.OpenCodePath)
-{
-    UseShellExecute = false,   // must be false for EnvironmentVariables to apply
-};
-
-startInfo.EnvironmentVariables["HTTP_PROXY"]  = proxy;
-startInfo.EnvironmentVariables["HTTPS_PROXY"] = proxy;
-startInfo.EnvironmentVariables["ALL_PROXY"]   = proxy;
-startInfo.EnvironmentVariables["NO_PROXY"]    = settings.NoProxy;
-
-Process.Start(startInfo);
-```
-
-Windows environment variable names are **case-insensitive**, so this overrides any stale value inherited from the parent — that is exactly why this approach is reliable.
-
-## Project layout
-
-```
-opencode-proxy-launcher/
-├── OpenCodeProxyLauncher.csproj   net10.0-windows + WPF
-├── app.ico                        application icon
-├── App.xaml / App.xaml.cs         entry point
-├── MainWindow.xaml / .xaml.cs     main window (Settings / Usage / Log tabs)
-├── Theme.xaml                     styles (all colors via DynamicResource)
-├── ThemeLight.xaml / ThemeDark.xaml   two palettes
-├── ThemeManager.cs                runtime theme switching / follow system
-├── Strings.cs                     Chinese + English string table
-├── Units.cs                       number units (raw / 万 / 千万 / 亿)
-├── WebUiServer.cs                 built-in WebUI (mini HTTP over TcpListener)
-├── UsageReader.cs                 reads local usage (OpenCode v2 only)
-├── AccountUsageReader.cs          calls the official quota endpoint
-├── Sqlite.cs                      read-only P/Invoke wrapper over winsqlite3.dll
-├── AppSettings.cs                 settings persistence + app path detection
-├── Launcher.cs                    injects env vars and starts OpenCode
-├── ProxyChecker.cs                proxy health check
-├── ai.md                          AI handover document (Chinese)
-```
-
-## Configuration
-
-`%APPDATA%\OpenCodeProxyLauncher\settings.json`
-
-```json
-{
-  "ProxyUrl": "http://127.0.0.1:2080",
-  "OpenCodePath": "C:\\Users\\you\\AppData\\Local\\Programs\\@opencode-aidesktop\\OpenCode.exe",
-  "NoProxy": "127.0.0.1,localhost,::1",
-  "CloseAfterLaunch": false,
-  "DarkMode": null,
-  "Language": null,
-  "WebUiEnabled": true,
-  "WebUiPort": 8710,
-  "WebUiToken": "(auto-generated)",
-  "NumberUnit": "raw"
-}
-```
-
-`DarkMode` / `Language` set to `null` means "follow the system"; `NumberUnit` is one of `raw` / `wan` / `qianwan` / `yi`.
-
-## Build from source
-
-```bash
-git clone https://github.com/VeloxLLM/opencode-proxy-launcher.git
-cd opencode-proxy-launcher
-
-# (1) Single-file, self-contained (recommended) — one exe, no .NET needed, ~62 MB
-dotnet publish -c Release -r win-x64 \
-  -p:SelfContained=true -p:PublishSingleFile=true \
-  -p:IncludeNativeLibrariesForSelfExtract=true \
-  -p:EnableCompressionInSingleFile=true \
-  -p:DebugType=none -p:DebugSymbols=false -o dist
-
-# (2) Single-file, framework-dependent — ~200 KB, needs .NET 10 Desktop Runtime
-dotnet publish -c Release -r win-x64 \
-  -p:SelfContained=false -p:PublishSingleFile=true \
-  -p:DebugType=none -p:DebugSymbols=false -o dist
-```
-
-| Variant | Output | Size | Needs .NET |
-| --- | --- | --- | --- |
-| (1) Self-contained | one exe | ~62 MB | ❌ No |
-| (2) Framework-dependent | one exe | ~200 KB | ✅ .NET 10 Desktop Runtime |
-
-**Two easy-to-hit pitfalls:**
-
-1. `--self-contained false` on the command line is *ignored* by .NET 10 and still produces a huge self-contained bundle. Use `-p:SelfContained=false`.
-2. WPF native libraries (`wpfgfx_cor3.dll`, `PresentationNative_cor3.dll`, …) are **not bundled into the single file by default** — without `IncludeNativeLibrariesForSelfExtract=true` you get 5 extra DLLs next to the exe.
-
-## OpenCode version compatibility
-
-- **OpenCode v2 only**: verified against the **v2.3.0** local database schema.
-  The usage panel reads `session_v2` / `session_message` / `session_part`, and provider/model IDs
-  from `data.model.providerID` / `data.model.id`. A database without v2 tables reports an error.
-- The launcher itself only **injects env vars when creating the process**, which is independent of
-  OpenCode's version. If the install location changes, use "Auto detect" or "Browse…" to point at
-  the new path.
-
-## FAQ
-
-**Q: Why not just inject a DLL?**
-
-Environment variables are read **at process start**, and OpenCode's backend sidecar is a **separate child process** forked via Electron's `utilityProcess.fork()`. Injecting into the main process afterwards cannot change an already-running process's environment, let alone the child's.
-
-**Q: I already set system/user environment variables — do I still need this?**
-
-If whatever launches OpenCode can see them, no. But the process that actually creates the child on Windows often carries a **stale environment**, which is the root of the problem.
-
-**Q: Does it affect other programs?**
-
-No. The environment variables are set only for this one child process. No registry writes, no system proxy changes.
-
-**Q: Does it support SOCKS5?**
-
-The field takes an HTTP proxy URL. Clash / Throne / v2rayN mixed or HTTP ports work as-is.
-
-**Q: Still getting the region error after launching?**
-
-Click **Test proxy** and check the **exit country**. If it says China, the proxy itself isn't working.
-
-**Q: I clicked "Launch OpenCode" but no window appeared.**
-
-The launcher waits 3.5 s and reports clearly if the process died. When this happens, the most likely cause is that **the launcher itself was started by another program in a restricted context** (e.g. from a sandbox). Close the window and **double-click the exe from File Explorer** instead.
-
-**Q: Where does the usage data come from?**
-
-- **Account quota**: the official endpoint `GET https://opencode.ai/zen/go/v1/usage`, authenticated with the `opencode-go` key from `~/.local/share/opencode/auth.json`.
-- **Local stats**: read-only access to `~/.local/share/opencode/opencode.db`. Only v2 tables (`session_message` / `session_v2`) are used. Using `session_v2.time_created` for "today" would make it always 0.
-
-## Known limitations
-
-- Windows only
-- Only launches the OpenCode **desktop app (GUI)**, not the CLI / TUI
-- The health check relies on `ip-api.com` (HTTP only on the free tier)
-- Usage stats rely on the system-provided `winsqlite3.dll` (present on Windows 10+)
-
-## Roadmap
-
-- [ ] **macOS support** — the env-var injection logic is identical; needs the WPF UI ported to Avalonia or MAUI, plus `.app` bundle launching
-- [ ] **Linux support** — same as above; also replace the `winsqlite3.dll` approach with the system SQLite
-
-## Credits
-
-Built by **DeepSeek V4.1 Flash** together with the author — from reverse-engineering OpenCode's proxy mechanism and pinpointing the subtle "stale launcher environment" trap, all the way to the WPF UI, the WebUI, the usage panel and this document.
-
-## License
-
-MIT
