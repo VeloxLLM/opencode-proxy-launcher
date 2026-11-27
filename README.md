@@ -20,6 +20,10 @@
 
 ---
 
+> [!NOTE]
+> **Archived — no updates for now.** The tool is working reliably, so active maintenance is paused and no further updates are planned at this time.
+> **已归档，暂时不再更新。** 目前工具使用正常、运行稳定，因此暂停维护，暂无更新计划。
+
 # English
 
 ## What it solves
